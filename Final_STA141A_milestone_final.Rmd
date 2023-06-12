@@ -1,0 +1,1490 @@
+---
+title: "STA141A_Final_Project"
+output: html_document
+date: "2023-05-26"
+author: "Dana Dossmann"
+---
+
+## Project Overview:
+
+- Title
+- Abstract
+- Part 1: Introduction to data set, exploratory data analysis
+- Part 2: Data Integration using average spikes per trial
+- Part 3: Predictive Modeling on testing data using Logistic Regression & Performance Analysis
+- Conclusion: Findings & Future Steps
+- Acknowledgements
+- Appendix (Code)
+
+
+## Abstract: 
+
+In this report, I am learning about the data structure across sessions where 4 different mice, Cori, Forssmann, Hench, and Lederberg had to perform the task of turning a wheel to the left or right based on different contrast levels. I explored the different success rates across the mice, how they changed across sessions, the average number of neurons and average number of brain areas used by the different mice in the different sessions, and how the average neuron spikes in different brains areas changed across sessions 1,2, and 3. I built a predicitive model using logistic regression and analyzed my results using a confusion matrix and different metrics, such as the F1 score. Overall, I believe that there are inherent differences between the mice in terms of ability to perform the task at hand successfully and in terms of learning and improving their skill. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+suppressWarnings(library(tidyverse))
+suppressWarnings(library(knitr))
+suppressWarnings(library(dplyr))
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# Load the data 
+setwd("/Users/danadossmann/Downloads/STA_141A/sessions")
+session=list()
+for(i in 1:18){
+  session[[i]]=readRDS(paste('session',i,'.rds',sep=''))
+  }
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# Summarize the info across sessions:
+
+# All values in this function serve only as place holders:
+
+# This tells us the # of sessions in the dataset:
+
+n.session = length(session)
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+n.session=length(session)
+
+# in library tidyverse
+meta <- tibble(
+  mouse_name = rep('name',n.session),
+  date_exp =rep('dt',n.session),
+  n_brain_area = rep(0,n.session),
+  n_neurons = rep(0,n.session),
+  n_trials = rep(0,n.session),
+  success_rate = rep(0,n.session)
+)
+
+
+for(i in 1:n.session){
+  tmp = session[[i]];
+  meta[i,1]=tmp$mouse_name;
+  meta[i,2]=tmp$date_exp;
+  meta[i,3]=length(unique(tmp$brain_area));
+  meta[i,4]=dim(tmp$spks[[1]])[1];
+  meta[i,5]=length(tmp$feedback_type);
+  meta[i,6]=mean(tmp$feedback_type+1)/2;
+  }
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+n.session <- length(session)
+
+# Create the 'meta' tibble with initial values
+meta <- tibble(
+  session = 1:n.session,
+  mouse_name = rep('name', n.session),
+  date_exp = rep('dt', n.session),
+  n_brain_area = rep(0, n.session),
+  n_neurons = rep(0, n.session),
+  n_trials = rep(0, n.session),
+  success_rate = rep(0, n.session)
+)
+
+# Update the 'meta' tibble with values from each session
+for (i in 1:n.session) {
+  tmp <- session[[i]]
+  meta[i, "mouse_name"] <- tmp$mouse_name
+  meta[i, "date_exp"] <- tmp$date_exp
+  meta[i, "n_brain_area"] <- length(unique(tmp$brain_area))
+  meta[i, "n_neurons"] <- dim(tmp$spks[[1]])[1]
+  meta[i, "n_trials"] <- length(tmp$feedback_type)
+  meta[i, "success_rate"] <- mean(tmp$feedback_type + 1) / 2
+}
+```
+
+
+# (i) describe the data structures across sessions
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+# table that summarizes some of the data and gives an overview of the data structures across sessions
+kable(meta, format = "html", table.attr = "class= 'table
+table-striped'", digits = 2)
+```
+<p style="text-align: center;">**Table 1**. Data structure across sessions.</p>
+
+
+# Explanation of Variables:
+
+In this table, each row corresponds to a session (18 in total) and every column is a variable.
+Mouse_name informs us of which of the 4 mice (Cori, Forssmann, Hench, Lederberg) is actually doing the experiment in that session.
+Date_exp tells us the date that that specific experiment (trials in that session) was performed.
+N_brain_area tells us the number of brain areas that had neuron spikes for the trials in that session.
+N_neurons tells us the number of neurons that had spikes for the trials in that session.
+- For example, Session 1 observed 734 neurons from 8 brain areas.
+N_trials tells us the number of trials that were performed in that session.
+The success_rate tells us the percentage of trials in that session that were deemed a "success", meaning that the mouse correctly responded to the given contrast levels.
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+## MSI Consulting session 1 adapted code:
+## creating the function plot.trial:
+
+plot.trial<-function(i.t,area, area.col,this_session){
+    
+    spks=this_session$spks[[i.t]];
+    n.neuron=dim(spks)[1]
+    time.points=this_session$time[[i.t]]
+    
+    plot(0,0,xlim=c(min(time.points),max(time.points)),ylim=c(0,n.neuron+1),col='white', xlab='Time (s)',yaxt='n', ylab='Neuron', main=paste('Trial ',i.t, 'feedback', this_session$feedback_type[i.t] ),cex.lab=1.5)
+    for(i in 1:n.neuron){
+        i.a=which(area== this_session$brain_area[i]);
+        col.this=area.col[i.a]
+        
+        ids.spike=which(spks[i,]>0) # find out when there are spikes 
+        if( length(ids.spike)>0 ){
+            points(x=time.points[ids.spike],y=rep(i, length(ids.spike) ),pch='.',cex=5, col=col.this) # larger cex value can make the points bigger
+        }
+      
+            
+    }
+    
+legend("topright", 
+  legend = area, 
+  col = area.col, 
+  pch = 16, 
+  cex = 0.8
+  )
+  }
+    
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# Wrapping up the function:
+
+average_spike_area<-function(i.t,this_session){
+  spk.trial = this_session$spks[[i.t]]
+  area= this_session$brain_area
+  spk.count=apply(spk.trial,1,sum)
+  spk.average.tapply=tapply(spk.count, area, mean)
+  return(spk.average.tapply)
+  }
+
+# Test the function
+#average_spike_area(1,this_session = session[[i.s]])
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+i.s=2
+n.trial=length(session[[i.s]]$feedback_type)
+#n.trial
+n.area=length(unique(session[[i.s]]$brain_area ))
+#n.area
+# Alternatively, you can extract these information in the meta that we created before.
+
+# We will create a data frame that contain the average spike counts for each area, feedback type,  the two contrasts, and the trial id
+
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback type', 'left contrast','right contrast','id' )
+
+# Turning it into a data frame
+trial.summary <- as_tibble(trial.summary)
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# indicating we want trial #1 in session #2:
+
+i.s=2
+i.t=1
+
+spk.trial = session[[i.s]]$spks[[i.t]]
+area=session[[i.s]]$brain_area
+
+# We need to first calculate the # of spikes for each neuron during this trial:
+spk.count=apply(spk.trial,1,sum)
+
+# Next we take the average of spikes across neurons that live in the same area
+
+# You can use tapply() or group_by() in dplyr
+
+# tapply():
+spk.average.tapply=tapply(spk.count, area, mean)
+
+
+# dplyr: 
+# To use dplyr you need to create a data frame
+tmp <- data.frame(
+  area = area,
+  spikes = spk.count
+)
+# Calculate the average by group using dplyr
+spk.average.dplyr =tmp %>%
+  group_by(area) %>%
+  summarize(mean= mean(spikes))
+
+```
+
+
+# (ii) explore the neural activities during each trial
+
+I decided to explore neural activities across sessions 1,2, and 3 so that I could hold the mouse partaking in the trails across the different sessions constant. I chose the sessions corresponding to Cori because his success rate increased from 0.605 in session 1 to 0.633 in session 2 to 0.662 in session 3 as he did more and more trials. This intrigued me as the other mice had both increases and decreases in their success rates for different sessions as they partook in more and more trials and sessions. I wanted to look for patterns or trends in average spike counts per brain area across the different sessions that may point towards his increasing success. 
+
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+# Now I apply the function across all trials and create a data frame for downstream analysis, including visualization. 
+# indicating we want trial # in session # :
+# adapated consulting session code:
+
+i.s=1
+i.t=1
+
+spk.trial = session[[i.s]]$spks[[i.t]]
+area=session[[i.s]]$brain_area
+
+# We need to first calculate the # of spikes for each neuron during this trial:
+spk.count=apply(spk.trial,1,sum)
+
+# Next we take the average of spikes across neurons that live in the same area
+
+# You can use tapply() or group_by() in dplyr
+
+# tapply():
+spk.average.tapply=tapply(spk.count, area, mean)
+
+
+# dplyr: 
+# To use dplyr you need to create a data frame
+tmp <- data.frame(
+  area = area,
+  spikes = spk.count
+)
+# Calculate the average by group using dplyr
+spk.average.dplyr =tmp %>%
+  group_by(area) %>%
+  summarize(mean= mean(spikes))
+
+
+# Wrapping up the function:
+
+average_spike_area<-function(i.t,this_session){
+  spk.trial = this_session$spks[[i.t]]
+  area= this_session$brain_area
+  spk.count=apply(spk.trial,1,sum)
+  spk.average.tapply=tapply(spk.count, area, mean)
+  return(spk.average.tapply)
+  }
+
+# Test the function
+average_spike_area(1,this_session = session[[i.s]])
+
+
+n.trial=length(session[[i.s]]$feedback_type)
+n.trial
+n.area=length(unique(session[[i.s]]$brain_area ))
+n.area
+# Alternatively, you can extract these information in the meta that we created before.
+
+# We will create a data frame that contain the average spike counts for each area, feedback type,  the two contrasts, and the trial id
+
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback type', 'left contrast','right contrast','id' )
+
+# Turning it into a data frame
+trial.summary <- as_tibble(trial.summary)
+
+
+
+area.col=rainbow(n=n.area,alpha=0.7)
+# In base R, I usually initiate a blank plot before drawing anything on it
+plot(x=1,y=0, col='white',xlim=c(0,n.trial+30),ylim=c(0.5,2.2), xlab="Trials",ylab="Average spike counts", main=paste("Spikes per area in Session", i.s))
+
+
+for(i in 1:n.area){
+  lines(y=trial.summary[[i]],x=trial.summary$id,col=area.col[i],lty=2,lwd=1)
+  lines(smooth.spline(trial.summary$id, trial.summary[[i]]),col=area.col[i],lwd=3)
+  }
+legend("topright", 
+  legend = colnames(trial.summary)[1:n.area], 
+  col = area.col, 
+  lty = 1, 
+  cex = 0.8
+)
+```
+<p style="text-align: center;">**Table 2**. Session 1 Neural Activity Across Trials.</p>
+
+
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+# indicating we want trial # in session # 2:
+
+i.s=2
+i.t=1
+
+spk.trial = session[[i.s]]$spks[[i.t]]
+area=session[[i.s]]$brain_area
+
+# We need to first calculate the # of spikes for each neuron during this trial:
+spk.count=apply(spk.trial,1,sum)
+
+# Next we take the average of spikes across neurons that live in the same area
+
+# You can use tapply() or group_by() in dplyr
+
+# tapply():
+spk.average.tapply=tapply(spk.count, area, mean)
+
+
+# dplyr: 
+# To use dplyr you need to create a data frame
+tmp <- data.frame(
+  area = area,
+  spikes = spk.count
+)
+# Calculate the average by group using dplyr
+spk.average.dplyr =tmp %>%
+  group_by(area) %>%
+  summarize(mean= mean(spikes))
+
+
+# Wrapping up the function:
+
+average_spike_area<-function(i.t,this_session){
+  spk.trial = this_session$spks[[i.t]]
+  area= this_session$brain_area
+  spk.count=apply(spk.trial,1,sum)
+  spk.average.tapply=tapply(spk.count, area, mean)
+  return(spk.average.tapply)
+  }
+
+# Test the function
+average_spike_area(1,this_session = session[[i.s]])
+
+
+n.trial=length(session[[i.s]]$feedback_type)
+n.trial
+n.area=length(unique(session[[i.s]]$brain_area ))
+n.area
+# Alternatively, you can extract these information in the meta that we created before.
+
+# We will create a data frame that contain the average spike counts for each area, feedback type,  the two contrasts, and the trial id
+
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback type', 'left contrast','right contrast','id' )
+
+# Turning it into a data frame
+trial.summary <- as_tibble(trial.summary)
+
+
+
+area.col=rainbow(n=n.area,alpha=0.7)
+# In base R, I usually initiate a blank plot before drawing anything on it
+plot(x=1,y=0, col='white',xlim=c(0,n.trial+30),ylim=c(0.5,2.2), xlab="Trials",ylab="Average spike counts", main=paste("Spikes per area in Session", i.s))
+
+
+for(i in 1:n.area){
+  lines(y=trial.summary[[i]],x=trial.summary$id,col=area.col[i],lty=2,lwd=1)
+  lines(smooth.spline(trial.summary$id, trial.summary[[i]]),col=area.col[i],lwd=3)
+  }
+legend("topright", 
+  legend = colnames(trial.summary)[1:n.area], 
+  col = area.col, 
+  lty = 1, 
+  cex = 0.8
+)
+```
+<p style="text-align: center;">**Table 3**. Session 2 Neural Activity Across Trials.</p>
+
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+# indicating we want trial # in session # :
+
+i.s=3
+i.t=1
+
+spk.trial = session[[i.s]]$spks[[i.t]]
+area=session[[i.s]]$brain_area
+
+# We need to first calculate the # of spikes for each neuron during this trial:
+spk.count=apply(spk.trial,1,sum)
+
+# Next we take the average of spikes across neurons that live in the same area
+
+# You can use tapply() or group_by() in dplyr
+
+# tapply():
+spk.average.tapply=tapply(spk.count, area, mean)
+
+
+# dplyr: 
+# To use dplyr you need to create a data frame
+tmp <- data.frame(
+  area = area,
+  spikes = spk.count
+)
+# Calculate the average by group using dplyr
+spk.average.dplyr =tmp %>%
+  group_by(area) %>%
+  summarize(mean= mean(spikes))
+
+
+# Wrapping up the function:
+
+average_spike_area<-function(i.t,this_session){
+  spk.trial = this_session$spks[[i.t]]
+  area= this_session$brain_area
+  spk.count=apply(spk.trial,1,sum)
+  spk.average.tapply=tapply(spk.count, area, mean)
+  return(spk.average.tapply)
+  }
+
+# Test the function
+average_spike_area(1,this_session = session[[i.s]])
+
+
+n.trial=length(session[[i.s]]$feedback_type)
+n.trial
+n.area=length(unique(session[[i.s]]$brain_area ))
+n.area
+# Alternatively, you can extract these information in the meta that we created before.
+
+# We will create a data frame that contain the average spike counts for each area, feedback type,  the two contrasts, and the trial id
+
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback type', 'left contrast','right contrast','id' )
+
+# Turning it into a data frame
+trial.summary <- as_tibble(trial.summary)
+
+
+
+area.col=rainbow(n=n.area,alpha=0.7)
+# In base R, I usually initiate a blank plot before drawing anything on it
+plot(x=1,y=0, col='white',xlim=c(0,n.trial+30),ylim=c(0.5,2.2), xlab="Trials",ylab="Average spike counts", main=paste("Spikes per area in Session", i.s))
+
+
+for(i in 1:n.area){
+  lines(y=trial.summary[[i]],x=trial.summary$id,col=area.col[i],lty=2,lwd=1)
+  lines(smooth.spline(trial.summary$id, trial.summary[[i]]),col=area.col[i],lwd=3)
+  }
+legend("topright", 
+  legend = colnames(trial.summary)[1:n.area], 
+  col = area.col, 
+  lty = 1, 
+  cex = 0.8
+)
+```
+<p style="text-align: center;">**Table 4**. Session 3 Neural Activity Across Trials.</p>
+
+Tables 2,3, and 4 show the average spike counts and spike trends for mouse Cori across the trials within each session. In Table 2, which looks at average spike counts for the trials in session 1, we can see a flat level of average spike counts for some neurons in brain areas across the trials, such as for the light blue neuron MOs. However, for most of the different neurons, we see the overall trend of average spike counts declining as the trials continue. Neurons displaying this behavior include the light green line (), the pink line(), the darker green line (), and more. This may be explained by Cori getting more and more tired as the trials progress so that his average spike counts are decreasing.
+
+In Table 3, which looks at average spike counts for the trials in session 2, we see a somewhat similar picture that also has some distinct differences. Firstly, the only neuron that showed activity and spike levels in both sessions was root. Every other active brain areas's neuron was different between the two sessions. The purple line (VISpm) was very flat across the trials, which is similar to trend we saw in table 2. However, the other average spike counts were more volatile, with a pattern of increases and then decreases about every 25 - 50 trials. The red line (CA1) and green line (root) were especially volatile, which is not something we observed in table 2.
+
+In Table 4, which looks at average spike counts for the trials in session 3, while we see an overall decreasing trend in the average spike counts as the trials continue, these lines are also more volatile than in table 2. There seems to be a different pattern in this graph, which is that the neuorns in the certain brain areas are clumped together into two groups. For example, the top clump includes high activity levels in VISam, CA1, and NB brain areas while the rest of the brain area's neurons clearly had lower activity. 
+
+Across all three sessions, Cori's success rate improved from session 1 to session 2 and then again from session 2 to session 3. I also observed the average spike counts trends become more volatile as the sessions increased rather than the consistent decline that we saw in session 1, which may be something that helped Cori's success rate improve.
+
+I did some research into the different brain areas after observing that CA1 or CA3 was always a brain area that had high average spike counts across all of these graphs. Both of these areas are subsections of the CA region (Cornu Ammonis), which is a a part of the hippocampus, widely known as being important for memory. Cori's high values of neural activity in the CA1 and CA3 regions may be related to his consistent improvemnt in success rate as he partook in more trials and sessions.
+
+
+# (iii): explore the changes across trials
+
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center", fig.width=6, fig.height=5}
+i.s = 2
+n.trial=length(session[[i.s]]$feedback_type)
+#n.trial
+n.area=length(unique(session[[i.s]]$brain_area ))
+#n.area
+# Alternatively, you can extract these information in the meta that we created before.
+
+# We will create a data frame that contain the average spike counts for each area, feedback type,  the two contrasts, and the trial id
+
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback type', 'left contrast','right contrast','id' )
+
+# Turning it into a data frame
+trial.summary <- as_tibble(trial.summary)
+
+
+varname=names(trial.summary);
+area=varname[1:(length(varname)-4)]
+par(mfrow=c(1,3))
+plot.trial(1,area, area.col,session[[i.s]])
+plot.trial(2,area, area.col,session[[i.s]])
+plot.trial(3,area, area.col,session[[i.s]])
+
+par(mfrow=c(1,1))
+```
+<p style="text-align: center;">**Table 5**. Neural Activity in Trials 1,2,3 in Session 2.</p>
+
+For these graphs, I am defining neural activity as spike count in a neuron, which is why every dot on these graphs is a spike in a neuron at a certain time. 
+
+In table 5, I chose to explore the changes across the first 3 trials of session 2 because I wanted to continue to learn more about Cori since I looked at his neural activity across all of his trials in tables 2,3, and 4. I also wanted to explore if there were similarities across trials 1 and 3, as these both had a feedback type of -1 while his trial 2 in this session had a feedback type of 1.
+
+We can see that while session 1 has the most neural activity of all of the trials, especially with the CA1, VISpm, and POST neurons, session 3 also shows significant neural activity, especially with the CA1 and POST neurons. However, while session 2 still has a good amount of root and VISI, session 2 clearly shows less neural activity across all neurons. This pattern of more overall activity in trial 1, less activity in trial 2, and more activity again in trial 3 also corresponds with their feedback types, which are -1,1,-1. This is surprising to me, as I would have suspected that trials showing more neural activity levels would have performed better, getting a feedback type of 1 (a success).
+
+Across all trials, the POST and VISpm neurons seems to be more concentrated in certain areas and clumped together than the other neurons. As I discussed with tables 2,3, and 4, the CA1 brain area is related to memory functions, which is why I am also surprised that there are less spikes in trial 2 for this neuron, since this feedback type was a success compared to trials 1 and 3.
+
+# (iv) explore homogeneity and heterogeneity across sessions and mice
+
+I chose to use the following graphs since these are color coded by mouse, which helps us look at the homogeneity and heterogeneity across sessions as well as across mice.
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+meta$session<-1:nrow(meta)
+```
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+ggplot(meta,                    
+       aes(x = session,
+           y = success_rate,
+           group = mouse_name)) +
+  geom_line(aes(col = mouse_name)) +
+  geom_point() +
+  xlab("Session Number") +
+  ylab("Success Rate") +
+  ggtitle("Success Rate per Session across Mice") +
+  scale_x_continuous(breaks=seq(1,18,by=1))
+  
+```
+<p style="text-align: center;">**Table 6**. Success Rate per Session across Mice.</p>
+
+Overall, the different mice seem to all have shown improvement in their success rate in at least two sessions after their first session. For example, Cori's success rate went from 0.605 in session 1 to 0.633 in session 2 to 0.662 in session 3. The other mice had more mixed and volatile results with an overall trend of an increasing success rate as they partook in more and more sessions and maybe learned more about the task and improved their skills.
+
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+ggplot(meta,                    
+       aes(x = session,
+           y = n_brain_area,
+           group = mouse_name)) +
+  geom_line(aes(col = mouse_name)) +
+  geom_point() +
+  xlab("Session Number") +
+  ylab("Number of Brain Areas Used") +
+  ggtitle("Number of Brain Areas per Session across Mice") +
+  scale_x_continuous(breaks=seq(1,18,by=1))
+  
+```
+<p style="text-align: center;">**Table 7**. Number of Brain Areas per Session across Mice.</p>
+
+This graph shows that the mouse Hench had an overall trend of decreasing the number of brain areas used as the sessions went on and on. The results are more mixed for the other mice as Cori saw a drop in the number of brain areas used and then a steep increase. Forssmann and Lederberg saw steep declines after one-two sessions and then an increase in the number of areas used. We can compare these results with the takeaways from the previous graph (Success Rate per Session) in which we saw an overall trend of improvement in the mice's success rates as each of them partook in more and more sessions. This may indicate that the number of brain areas used is not necessarily related to the overall success rate in the session.
+
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+ggplot(meta,                    
+       aes(x = session,
+           y = n_neurons,
+           group = mouse_name)) +
+  geom_line(aes(col = mouse_name)) +
+  geom_point() +
+  xlab("Session Number") +
+  ylab("Number of Neurons Used") +
+  ggtitle("Number of Neurons per Session across Mice") +
+  scale_x_continuous(breaks=seq(1,18,by=1))
+  
+```
+<p style="text-align: center;">**Table 8**. Number of Neurons per Session across Mice.</p>
+
+The only mouse who shows a relatively clear trend in total number of neurons used in a session as they partook in more sessions is Forssmann, who had two steep declines in number of neurons used. The other mice all show mixed results as the number of neurons used increase and decrease over various sessions. We can again compare these results with the takeaways from the previous graph (Success Rate per Session) in which we saw an overall trend of improvement in the mice's success rates as each of them partook in more and more sessions to see how the number of neurons used changed for different mice over different sessions in comparison to their success rates. This may also be indicative of the idea that potentially success rate is not necessarily related the number of neurons used.
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# https://www.guru99.com/r-aggregate-function.html
+table <- meta %>%
+	group_by(mouse_name) %>%
+	summarise(
+	  avg_success_rate = mean(success_rate),
+	  std_success_rate = sd(success_rate),
+	  avg_neurons = mean(n_neurons),
+	  avg_brain_areas = mean(n_brain_area))
+```
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+kable(table, format = "html", table.attr = "class= 'table
+table-striped'", digits = 3)
+```
+<p style="text-align: center;">**Table 9**. Comparing Mice by averages and standard deviation.</p>
+
+We can use this table to easily compare the mice now based on average success rates, the standard deviation of their success rates, the average neurons used, and the average number of brain areas used. We can see that Lederberg clearly had the highest average success rate, with Hench coming in second, Forssmann coming in third, and Cori coming in last. When looking at the standard deviation of success rate, Hench had the highest, with Lederberg having the second highest variability. However, when looking at the average number of neurons used Forssmann had the highest number, although he was third in terms of success rate. Hench had the highest average number of brain areas, with Lederberg having used the second highest number of brain areas. Like we saw with the graphs above, this may indicate that the average number of neurons used is not indicative of high success rates, and that there may be mixed evidence on whether the average number of brain areas used has implications for success rates.
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# indicating we want trial # in session #:
+# library(rlang)
+i.s=13
+i.t=1
+
+spk.trial = session[[i.s]]$spks[[i.t]]
+area=session[[i.s]]$brain_area
+
+# We need to first calculate the # of spikes for each neuron during this trial:
+spk.count=apply(spk.trial,1,sum)
+
+# Next we take the average of spikes across neurons that live in the same area
+
+# You can use tapply() or group_by() in dplyr
+
+# tapply():
+spk.average.tapply=tapply(spk.count, area, mean)
+
+
+# dplyr: 
+# To use dplyr you need to create a data frame
+tmp <- data.frame(
+  area = area,
+  spikes = spk.count
+)
+# Calculate the average by group using dplyr
+spk.average.dplyr =tmp %>%
+  group_by(area) %>%
+  summarize(mean= mean(spikes))
+
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# Wrapping up the function:
+average_spike_area<-function(i.t,this_session){
+  spk.trial = this_session$spks[[i.t]]
+  area= this_session$brain_area
+  spk.count=apply(spk.trial,1,sum)
+  spk.average.tapply=tapply(spk.count, area, mean)
+  return(spk.average.tapply)
+  }
+
+# Test the function
+#average_spike_area(1,this_session = session[[i.s]])
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+n.trial=length(session[[i.s]]$feedback_type)
+n.area=length(unique(session[[i.s]]$brain_area ))
+# Alternatively, you can extract these information in the meta that we created before.
+# We will create a data frame that contains the average spike counts for each area, feedback type,  the two contrasts, and the trial id:
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback type', 'left contrast','right contrast','id' )
+
+# Turning it into a data frame (tibble)
+trial.summary <- as_tibble(trial.summary)
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# so that i.s (the session #) is the correct one under the session column in the trial.summary dataframe
+trial.summary$session<-i.s
+
+# want to use the same column names in trial.summary in new "pooled" trial.summary dataset
+colnames_13 <- colnames(trial.summary)
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+
+## creating data frame called trial.summary_pooled that is empty with the column names
+
+## Session 13 had 20 neurons (the most amount)
+
+trial.summary_pooled <- data.frame(matrix(ncol = 20, nrow = 0))
+
+# earlier code: colnames_13<-colnames(trial.summary)
+
+# to make the column names of the pooled = column names of trial.summary data frame we already had
+
+x <- colnames_13
+colnames(trial.summary_pooled) <- x
+
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, results='hide',include = FALSE, message=FALSE}
+## code from the Prof from consulting session 2 for getting average spike in the trial
+
+## line 1 calculates the total number of spikes for each neuron in spks.trial. The apply function is used to apply the sum function across rows (since 1 indicates rows) of the spks.trial matrix. The result is stored in the total.spikes vector.
+
+spks.trial=session[[1]]$spks[[1]]
+
+total.spikes=apply(spks.trial,1,sum)
+(avg.spikes=mean(total.spikes))
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+#### adapted code from consulting session 1:
+
+### wanting to get all sessions into one table (called trial.summary_pooled):
+## putting all info from session 1 --> session 18 into one data frame called trial.summary_pooled
+## chose to include all sessions so I would include as much information as possible
+
+# made trial.summary as an empty dataframe
+# made a for loop so it re runs code for every session
+# binded those rows together to make the trial.summary_pooled dataset
+
+for (i.s in 1:18) {
+  # indicating we want trial #1 in session #2:
+  # library(rlang)
+  
+  i.t = 1
+  
+  spk.trial = session[[i.s]]$spks[[i.t]]
+  area = session[[i.s]]$brain_area
+  
+  # We need to first calculate the # of spikes for each neuron during this trial:
+  spk.count = apply(spk.trial, 1, sum)
+  
+  # Next we take the average of spikes across neurons that live in the same area
+  
+  # You can use tapply() or group_by() in dplyr
+  
+  # tapply():
+  spk.average.tapply = tapply(spk.count, area, mean)
+  
+  
+  # dplyr:
+  library(dplyr)
+  # To use dplyr you need to create a data frame
+  tmp <- data.frame(area = area,
+                    spikes = spk.count)
+  # Calculate the average by group using dplyr
+  spk.average.dplyr = tmp %>%
+    group_by(area) %>%
+    summarize(mean = mean(spikes))
+  
+  
+  n.trial = length(session[[i.s]]$feedback_type)
+  n.area = length(unique(session[[i.s]]$brain_area))
+  # Alternatively, you can extract these information in the meta that we created before.
+  
+  # We will create a data frame that contain the average spike counts for each area, feedback type,  the two contrasts, and the trial id
+  
+  trial.summary = matrix(nrow = n.trial, ncol = n.area + 1 + 2 + 1)
+  for (i.t in 1:n.trial) {
+    trial.summary[i.t, ] = c(
+      average_spike_area(i.t, this_session = session[[i.s]]),
+      session[[i.s]]$feedback_type[i.t],
+      session[[i.s]]$contrast_left[i.t],
+      session[[i.s]]$contrast_right[i.t],
+      i.t
+    )
+  }
+  
+  colnames(trial.summary) = c(
+    names(average_spike_area(i.t, this_session = session[[i.s]])),
+    'feedback type',
+    'left contrast',
+    'right contrast',
+    'id'
+  )
+  
+# Turning it into a data frame
+  
+# trial.summary$session <- i.s so the column session automatically goes to the session # i.s 
+  
+  trial.summary <- as_tibble(trial.summary)
+  trial.summary$session <- i.s
+  ## just prints the # of sessions as %s is used with the sprintf function to print
+  #print(sprintf("%s session", i.s))
+  #print(ncol(trial.summary))
+  spks.trial=session[[1]]$spks[[1]]
+  
+
+  ## can use bind_rows or cbind to combine the rows of the datasets vertically which stacks them (on top of each other). 
+  ## The resulting combined dataset will have all the columns from the original datasets.
+  trial.summary_pooled <-
+    bind_rows(trial.summary_pooled, trial.summary)
+  # trial.summary_pooled<-rbind(trial.summary_pooled, trial.summary)
+  # now have 5081 observations with 67 variables
+}
+trial.summary_pooled_train<-trial.summary_pooled
+```
+
+# Part 2: Data integration
+
+For part 2, I chose to integrate my data by averaging the spike counts across every trial. I chose to do my analysis in this way because I am less interested in the specific neurons in the different brain regions and more interested in the behavioral outcomes of the mice, the differences between the mice, how their behavior changes as the trial #s increase in the session, whether their success rate improved as the session # increased for specific mice, and more. I averaged the spike counts by creating new data frames that were my original pooled training dataset without the columns that were not neurons, such as feedback type, left contrast, mouse, and more. I chose to use an average over a weighted average because I thought that people with different opinions on how various brain areas and neurons affect the success rates would disagree over how exactly to weight the different areas and neurons. Therefore, I chose to be unbiased and just use the averaging method for part 2.
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# panda = trial.summary_pooled dataframe without feedback type, left contrast, right contrast, id, session variables
+#subset(trial.summary_pooled, select = -c(16:20) )
+panda <-subset(trial.summary_pooled_train, select = -c(16:20) )
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# pp_panda = panda dataframe without mouse, typeee_contrast, typeee_feedback
+pp_panda <-subset(panda, select = -c(63:65) )
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# calculating rowmeans in the pp_panda dataframe (has only spike counts)
+# adding this new column to trial.summary_pooled called rowmeans for data integration
+pp_panda$RowMeans<-rowMeans(pp_panda,na.rm=TRUE)
+trial.summary_pooled_train$rowmeans<- pp_panda$RowMeans
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# https://www.marsja.se/r-add-column-to-dataframe-based-on-other-columns-conditions-dplyr/
+
+trial.summary_pooled_train <- trial.summary_pooled_train %>%
+  mutate(mouse = case_when(session == 1 ~ 'Cori',
+                             session == 2 ~ 'Cori',
+                               session == 3 ~ 'Cori',
+                                 session == 4 ~ 'Forssmann',
+                                   session == 5 ~ 'Forssmann',
+                                     session == 6 ~ 'Forssmann',
+                                       session == 7 ~ 'Forssmann',
+                                         session == 8 ~ 'Hench',
+                                           session == 9 ~ 'Hench',
+                                              session == 10 ~ 'Hench',
+                                                session == 11 ~ 'Hench',
+                                                  session == 12 ~ 'Lederberg',
+                                                    session == 13 ~ 'Lederberg', 
+                                                      session == 14 ~ 'Lederberg',
+                                                        session == 15 ~ 'Lederberg',
+                                                          session == 16 ~ 'Lederberg',
+                                                            session == 17 ~ 'Lederberg',
+                                                              session == 18 ~ 'Lederberg'))
+                                                 
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# https://stackoverflow.com/questions/65366230/looping-over-a-column-and-replacing-values-if-condition-is-met-in-r
+# https://stackoverflow.com/questions/31261946/multiple-if-statements-in-r
+# https://sparkbyexamples.com/r-programming/add-column-to-dataframe-in-r/#:~:text=To%20add%20a%20new%20column%20in%20R%2C%20use%20cbin(),after%20adding%20a%20new%20column.
+
+# type_contrast is a new (empty) vector
+typeee_contrast <- c(mode = "numeric", length = nrow(trial.summary_pooled_train))
+
+for (i in 1:nrow(trial.summary_pooled_train)) {
+  if (trial.summary_pooled_train$`left contrast`[i] == 0 && trial.summary_pooled_train$`right contrast`[i] ==0) {
+    typeee_contrast[i] <- 0 
+  } else if (trial.summary_pooled_train$`left contrast`[i] > trial.summary_pooled_train$`right contrast`[i]) {
+    typeee_contrast[i] <- 2
+  } else if (trial.summary_pooled_train$`left contrast`[i] < trial.summary_pooled_train$`right contrast`[i]) {
+    typeee_contrast[i] <- 2
+  } else {
+    typeee_contrast[i] <- 1
+  }
+}
+
+# add typeee_contrast column to trial.summary_pooled_train
+trial.summary_pooled_train <- cbind(trial.summary_pooled_train,typeee_contrast)
+```
+
+
+
+# Part 3: Predicitive Modeling with Logistic Regression
+
+For part 3, I chose to add multiple variables to my model and then use logistic regression. The first variable that I created and added to my training and testing datasets was type of contrast, which created a column differentiating which type of contrast scenario the mouse was tasked with in that trial. I chose to do this because I thought that the scenario would affect the behavioral outcome and success rate of the mouse. This column had values 0,1, or 2 based on whether the contrast screens were both 0, whether both of the contrast screens had the same value greater than 0, or whether one of the two screens had a higher contrast level than the other. Another variable I added was mouse, because I assumed that there are basic differences in capability to have high success rates as well as abilities to learn and improve their task as they partook in more trials and sessions. I also included the variable rowmean, which was the average spike count per trial. I included this because I wanted to explore whether higher average spike counts and neural activity had implications on success rates. I chose to use logistic regression over a deep learning method because we don't have typically have the resources as students since it uses lots of computer power and is often too time consuming. I chose to also use SVM but unfortunately was unable to get it to work with the testing data today. I have included some of my SVM code in the appendix.
+
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# https://stackoverflow.com/questions/65366230/looping-over-a-column-and-replacing-values-if-condition-is-met-in-r
+# https://stackoverflow.com/questions/31261946/multiple-if-statements-in-r
+# https://sparkbyexamples.com/r-programming/add-column-to-dataframe-in-r/#:~:text=To%20add%20a%20new%20column%20in%20R%2C%20use%20cbin(),after%20adding%20a%20new%20column.
+
+# creating a new column in our dataset that is either 0 (when feedback type = -1) or = 1 when it is originally = 1
+# doing this because glm says y is a binary operator and therefore cannot use it if feedback type has value of -1
+typeee_feedback <- c(mode = "numeric", length = nrow(trial.summary_pooled_train))
+
+for (i in 1:nrow(trial.summary_pooled_train)) {
+  if (trial.summary_pooled_train$`feedback type`[i] == -1) {
+    typeee_feedback[i] <- 0 
+  } else {
+    typeee_feedback[i] <- 1
+  }
+}
+trial.summary_pooled_train <- cbind(trial.summary_pooled_train,typeee_feedback)
+
+# making it numeric to use in the glm function:
+trial.summary_pooled_train$typeee_feedback <- as.numeric(trial.summary_pooled_train$typeee_feedback)
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+final11_logregmodel <- glm(typeee_feedback ~ `left contrast` + `right contrast` + id + session + mouse + typeee_contrast + rowmeans, family = "binomial", data = trial.summary_pooled_train)
+final11_logregmodel
+
+#summary(final11_logregmodel)
+```
+
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+## https://stackoverflow.com/questions/59107717/how-do-i-load-an-rds-file-into-r
+setwd("/Users/danadossmann/Downloads/STA_141A/sessions")
+
+#test1.rds <- file.choose()
+ test1 <- readRDS("/Users/danadossmann/Downloads/sessions/test1.rds")
+ test2 <- readRDS("/Users/danadossmann/Downloads/sessions/test2.rds")
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+#setwd("/Users/danadossmann/Downloads/STA_141A/sessions")
+
+#test2.rds <- file.choose()
+# test2 <- readRDS(test2.rds)
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# used code that loaded the sessions but instead of a for loop loaded them one by one
+# now in a list that is same form as the sessions data as [[]] is a nested list
+
+test=list()
+test[[1]]<-test1
+test[[2]]<-test2
+session<-test
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+n.session=length(session)
+
+# in library tidyverse
+meta <- tibble(
+  mouse_name = rep('name',n.session),
+  date_exp =rep('dt',n.session),
+  n_brain_area = rep(0,n.session),
+  n_neurons = rep(0,n.session),
+  n_trials = rep(0,n.session),
+  success_rate = rep(0,n.session)
+)
+
+
+for(i in 1:n.session){
+  tmp = session[[i]];
+  meta[i,1]=tmp$mouse_name;
+  meta[i,2]=tmp$date_exp;
+  meta[i,3]=length(unique(tmp$brain_area));
+  meta[i,4]=dim(tmp$spks[[1]])[1];
+  meta[i,5]=length(tmp$feedback_type);
+  meta[i,6]=mean(tmp$feedback_type+1)/2;
+  }
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+n.session <- length(session)
+
+# Create the 'meta' tibble with initial values
+meta <- tibble(
+  session = 1:n.session,
+  mouse_name = rep('name', n.session),
+  date_exp = rep('dt', n.session),
+  n_brain_area = rep(0, n.session),
+  n_neurons = rep(0, n.session),
+  n_trials = rep(0, n.session),
+  success_rate = rep(0, n.session)
+)
+
+# Update the 'meta' tibble with values from each session
+for (i in 1:n.session) {
+  tmp <- session[[i]]
+  meta[i, "mouse_name"] <- tmp$mouse_name
+  meta[i, "date_exp"] <- tmp$date_exp
+  meta[i, "n_brain_area"] <- length(unique(tmp$brain_area))
+  meta[i, "n_neurons"] <- dim(tmp$spks[[1]])[1]
+  meta[i, "n_trials"] <- length(tmp$feedback_type)
+  meta[i, "success_rate"] <- mean(tmp$feedback_type + 1) / 2
+}
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+## creating the function plot.trial:
+
+plot.trial<-function(i.t,area, area.col,this_session){
+    
+    spks=this_session$spks[[i.t]];
+    n.neuron=dim(spks)[1]
+    time.points=this_session$time[[i.t]]
+    
+    plot(0,0,xlim=c(min(time.points),max(time.points)),ylim=c(0,n.neuron+1),col='white', xlab='Time (s)',yaxt='n', ylab='Neuron', main=paste('Trial ',i.t, 'feedback', this_session$feedback_type[i.t] ),cex.lab=1.5)
+    for(i in 1:n.neuron){
+        i.a=which(area== this_session$brain_area[i]);
+        col.this=area.col[i.a]
+        
+        ids.spike=which(spks[i,]>0) # find out when there are spikes 
+        if( length(ids.spike)>0 ){
+            points(x=time.points[ids.spike],y=rep(i, length(ids.spike) ),pch='.',cex=5, col=col.this) # larger cex value can make the points bigger
+        }
+      
+            
+    }
+    
+legend("topright", 
+  legend = area, 
+  col = area.col, 
+  pch = 16, 
+  cex = 0.8
+  )
+  }
+    
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# Wrapping up the function:
+
+average_spike_area<-function(i.t,this_session){
+  spk.trial = this_session$spks[[i.t]]
+  area= this_session$brain_area
+  spk.count=apply(spk.trial,1,sum)
+  spk.average.tapply=tapply(spk.count, area, mean)
+  return(spk.average.tapply)
+  }
+
+# Test the function
+#average_spike_area(1,this_session = session[[i.s]])
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+i.s=2
+n.trial=length(session[[i.s]]$feedback_type)
+n.trial
+n.area=length(unique(session[[i.s]]$brain_area ))
+n.area
+# Alternatively, you can extract these information in the meta that we created before.
+
+# We will create a data frame that contain the average spike counts for each area, feedback type,  the two contrasts, and the trial id
+
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback type', 'left contrast','right contrast','id' )
+
+# Turning it into a data frame
+trial.summary <- as_tibble(trial.summary)
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# indicating we want trial #1 in session #2:
+
+i.s=2
+i.t=1
+
+spk.trial = session[[i.s]]$spks[[i.t]]
+area=session[[i.s]]$brain_area
+
+# We need to first calculate the # of spikes for each neuron during this trial:
+spk.count=apply(spk.trial,1,sum)
+
+# Next we take the average of spikes across neurons that live in the same area
+
+# You can use tapply() or group_by() in dplyr
+
+# tapply():
+spk.average.tapply=tapply(spk.count, area, mean)
+
+
+# dplyr: 
+# To use dplyr you need to create a data frame
+tmp <- data.frame(
+  area = area,
+  spikes = spk.count
+)
+# Calculate the average by group using dplyr
+spk.average.dplyr =tmp %>%
+  group_by(area) %>%
+  summarize(mean= mean(spikes))
+
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+n.trial=length(session[[i.s]]$feedback_type)
+n.area=length(unique(session[[i.s]]$brain_area ))
+# Alternatively, you can extract these information in the meta that we created before.
+# We will create a data frame that contains the average spike counts for each area, feedback type,  the two contrasts, and the trial id:
+trial.summary =matrix(nrow=n.trial,ncol= n.area+1+2+1)
+for(i.t in 1:n.trial){
+  trial.summary[i.t,]=c(average_spike_area(i.t,this_session = session[[i.s]]),
+                          session[[i.s]]$feedback_type[i.t],
+                        session[[i.s]]$contrast_left[i.t],
+                        session[[i.s]]$contrast_right[i.s],
+                        i.t)
+}
+
+colnames(trial.summary)=c(names(average_spike_area(i.t,this_session = session[[i.s]])), 'feedback type', 'left contrast','right contrast','id' )
+
+# Turning it into a data frame (tibble)
+trial.summary <- as_tibble(trial.summary)
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# so that i.s (the session #) is the correct one under the session column in the trial.summary dataframe
+trial.summary$session<-i.s
+
+# want to use the same column names in trial.summary in new "pooled" trial.summary dataset
+colnames_13 <- colnames(trial.summary)
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+
+## creating data frame called trial.summary_pooled1 for testing data that is empty with the column names
+
+## Session 13 had 20 neurons (the most amount)
+
+trial.summary_pooled1 <- data.frame(matrix(ncol = 20, nrow = 0))
+trial.summary_pooled<-trial.summary_pooled1 
+# earlier code: colnames_13<-colnames(trial.summary)
+
+# to make the column names of the pooled = column names of trial.summary data frame we already had
+
+x <- colnames_13
+colnames(trial.summary_pooled) <- x
+
+
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+#### adapted code from consulting session 1:
+
+### wanting to get all sessions into one table (called trial.summary_pooled):
+
+for (i.s in 1:2) {
+  # indicating we want trial #1 in session #2:
+  # library(rlang)
+  
+  i.t = 1
+  
+  spk.trial = session[[i.s]]$spks[[i.t]]
+  area = session[[i.s]]$brain_area
+  
+  # We need to first calculate the # of spikes for each neuron during this trial:
+  spk.count = apply(spk.trial, 1, sum)
+  
+  # Next we take the average of spikes across neurons that live in the same area
+  
+  # You can use tapply() or group_by() in dplyr
+  
+  # tapply():
+  spk.average.tapply = tapply(spk.count, area, mean)
+  
+  
+  # dplyr:
+  library(dplyr)
+  # To use dplyr you need to create a data frame
+  tmp <- data.frame(area = area,
+                    spikes = spk.count)
+  # Calculate the average by group using dplyr
+  spk.average.dplyr = tmp %>%
+    group_by(area) %>%
+    summarize(mean = mean(spikes))
+  
+  
+  n.trial = length(session[[i.s]]$feedback_type)
+  n.area = length(unique(session[[i.s]]$brain_area))
+  # Alternatively, you can extract these information in the meta that we created before.
+  
+  # We will create a data frame that contain the average spike counts for each area, feedback type,  the two contrasts, and the trial id
+  
+  trial.summary = matrix(nrow = n.trial, ncol = n.area + 1 + 2 + 1)
+  for (i.t in 1:n.trial) {
+    trial.summary[i.t, ] = c(
+      average_spike_area(i.t, this_session = session[[i.s]]),
+      session[[i.s]]$feedback_type[i.t],
+      session[[i.s]]$contrast_left[i.t],
+      session[[i.s]]$contrast_right[i.t],
+      i.t
+    )
+  }
+  
+  colnames(trial.summary) = c(
+    names(average_spike_area(i.t, this_session = session[[i.s]])),
+    'feedback type',
+    'left contrast',
+    'right contrast',
+    'id'
+  )
+  
+# Turning it into a data frame
+  
+# trial.summary$session <- i.s so the column session automatically goes to the session # i.s 
+  
+  trial.summary <- as_tibble(trial.summary)
+  trial.summary$session <- i.s
+  ## just prints the # of sessions as %s is used with the sprintf function to print
+  print(sprintf("%s session", i.s))
+  print(ncol(trial.summary))
+  spks.trial=session[[1]]$spks[[1]]
+  
+
+  ## can use bind_rows or cbind to combine the rows of the datasets vertically which stacks them (on top of each other). 
+  ## The resulting combined dataset will have all the columns from the original datasets.
+  trial.summary_pooled <-
+    bind_rows(trial.summary_pooled, trial.summary)
+}
+trial.summary_pooled_test<-trial.summary_pooled
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# https://www.marsja.se/r-add-column-to-dataframe-based-on-other-columns-conditions-dplyr/
+
+trial.summary_pooled_test <- trial.summary_pooled_test %>%
+  mutate(mouse = case_when(session == 1 ~ 'Cori',
+                             session == 2 ~ 'Cori',
+                               session == 3 ~ 'Cori',
+                                 session == 4 ~ 'Forssmann',
+                                   session == 5 ~ 'Forssmann',
+                                     session == 6 ~ 'Forssmann',
+                                       session == 7 ~ 'Forssmann',
+                                         session == 8 ~ 'Hench',
+                                           session == 9 ~ 'Hench',
+                                              session == 10 ~ 'Hench',
+                                                session == 11 ~ 'Hench',
+                                                  session == 12 ~ 'Lederberg',
+                                                    session == 13 ~ 'Lederberg', 
+                                                      session == 14 ~ 'Lederberg',
+                                                        session == 15 ~ 'Lederberg',
+                                                          session == 16 ~ 'Lederberg',
+                                                            session == 17 ~ 'Lederberg',
+                                                              session == 18 ~ 'Lederberg'))
+                                                 
+
+
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# https://stackoverflow.com/questions/65366230/looping-over-a-column-and-replacing-values-if-condition-is-met-in-r
+# https://stackoverflow.com/questions/31261946/multiple-if-statements-in-r
+# https://sparkbyexamples.com/r-programming/add-column-to-dataframe-in-r/#:~:text=To%20add%20a%20new%20column%20in%20R%2C%20use%20cbin(),after%20adding%20a%20new%20column.
+
+# type_contrast is a new (empty) vector
+typeee_contrast <- c(mode = "numeric", length = nrow(trial.summary_pooled_test))
+
+for (i in 1:nrow(trial.summary_pooled_test)) {
+  if (trial.summary_pooled_test$`left contrast`[i] == 0 && trial.summary_pooled_test$`right contrast`[i] ==0) {
+    typeee_contrast[i] <- 0 
+  } else if (trial.summary_pooled_test$`left contrast`[i] > trial.summary_pooled_test$`right contrast`[i]) {
+    typeee_contrast[i] <- 2
+  } else if (trial.summary_pooled_test$`left contrast`[i] < trial.summary_pooled_test$`right contrast`[i]) {
+    typeee_contrast[i] <- 2
+  } else {
+    typeee_contrast[i] <- 1
+  }
+}
+
+# add typeee_contrast column to trial.summary_pooled_test
+trial.summary_pooled_test <- cbind(trial.summary_pooled_test,typeee_contrast)
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# creating a new column in our dataset that is either 0 (when feedback type = -1) or = 1 when it is originally = 1
+# doing this because glm says y is a binary operator and therefore cannot use it if feedback type has value of -1
+typeee_feedback <- c(mode = "numeric", length = nrow(trial.summary_pooled_test))
+
+for (i in 1:nrow(trial.summary_pooled_test)) {
+  if (trial.summary_pooled_test$`feedback type`[i] == -1) {
+    typeee_feedback[i] <- 0 
+  } else {
+    typeee_feedback[i] <- 1
+  }
+}
+trial.summary_pooled_test <- cbind(trial.summary_pooled_test,typeee_feedback)
+
+# making it numeric to use in the glm function:
+trial.summary_pooled_test$typeee_feedback <- as.numeric(trial.summary_pooled_test$typeee_feedback)
+```
+
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+## adding rowmeans column to trial.summary_pooled_test
+
+# panda = trial.summary_pooled dataframe without feedback type, left contrast, right contrast, id, session variables
+#subset(trial.summary_pooled, select = -c(16:20) )
+panda <-subset(trial.summary_pooled_test, select = -c(11:15) )
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# pp_panda = panda dataframe without mouse, typeee_contrast, typeee_feedback
+# changed which columns were removed because these columns are different #s in the test dataset
+pp_panda <-subset(panda, select = -c(22:24) )
+
+```
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+# calculating rowmeans in the pp_panda dataframe (has only spike counts)
+# adding this new column to trial.summary_pooled called rowmeans for data integration
+pp_panda$RowMeans<-rowMeans(pp_panda,na.rm=TRUE)
+trial.summary_pooled_test$rowmeans<- pp_panda$RowMeans
+```
+
+
+# Confusion Matrix:
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+#https://www.machinelearningplus.com/machine-learning/logistic-regression-tutorial-examples-r/
+
+pred <- predict(final11_logregmodel, newdata = trial.summary_pooled_test, type = "response")
+y_pred_num <- ifelse(pred > 0.5, 1, 0)
+# so that the predicto terms are only 0 or 1
+y_pred <- factor(y_pred_num, levels=c(0, 1))
+final11_confusion_matrix <- table(trial.summary_pooled_test$typeee_feedback,y_pred)
+final11_confusion_matrix
+```
+<p style="text-align: center;">**Table 10**. Logistic Regression Confusion Matrix.</p>
+
+This confusion matrix can be interpreted as:
+
+- True Positives: My model correctly predicted 139 instances as feedback type 1.
+- True Negatives: My model correctly predicted 8 instances as feedback type 0.
+- False Positives: My model incorrectly predicted 47 instances as feedback type 1 when they were actually feedback type 0.
+- False Negatives: My model incorrectly predicted 6 instances as feedback type 0 when they were actually feedback type 1.
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+TP1 <- 139
+FP1 <- 47
+FN1 <- 6
+TN1 <- 8
+
+Accuracy <- (TP1 + TN1) / (TP1 + FN1 + FP1 + TN1)
+Precision <- TP1 / (TP1 + FP1)
+Recall <- TP1 / (TP1 + FN1)
+True_Negative_Rate <- TN1 / (TN1 + FP1)
+F1_Score <- 2 * (Precision * Recall) / (Precision + Recall)
+
+# http://www.sthda.com/english/articles/36-classification-methods-essentials/151-logistic-regression-essentials-in-r/
+
+y_act <- trial.summary_pooled_test$typeee_feedback
+
+# Accuracy:
+# mean(y_pred == y_act)  
+
+# Misclassification Error Rate:
+# 1 - mean(y_pred == y_act) 
+Misclassification_Error_Rate <- 1 - mean(y_pred == y_act) 
+
+Misclassification_Error_Rate
+Accuracy
+Precision 
+Recall 
+True_Negative_Rate 
+F1_Score
+```
+
+These values (in order) are the misclassification error rate, accuracy, precision, recall, true negative rate, and the F1 score. My misclassification error was only 0.265, meaning that my accuracy was 0.735. My model correctly predicted 73.5% of the feedback types. My recall (correct predicitions of feedback type 1's) was 0.95862, while my true negative rate (correct predicitions of feedback type 0's) was only 0.14545. This means that while my model is fit well to be strong at predicting the feedback type 1's, it is not a good fit for prediciting the feedback type 0's. My F1 score was 0.83987, which is pretty strong since 1 is the best the F1 score can be.
+
+```{r, echo=FALSE, warning=FALSE,  message=FALSE, tab.align = "center"}
+install.packages("pROC", repos = "http://cran.us.r-project.org")
+install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+library(pROC)
+library(ggplot2)
+
+roc1_data <- roc(trial.summary_pooled_test$typeee_feedback,y_pred_num, PLOT = true)
+
+df1_roc = data.frame(y = roc1_data$sensitivities, x = 1- roc1_data$specificities)
+ggplot(df1_roc,                    
+       aes(x = x,
+           y = y)) +
+  geom_path() +
+  geom_abline(linetype = "dashed") +
+  xlab("False Positive Rate") +
+  ylab("True Positive Rate") +
+  ggtitle("ROC Curve for the Logistic Regression Model")
+
+```
+<p style="text-align: center;">**Table 11**. Logistic Regression ROC Curve.</p>
+
+Here we can see my ROC curve for my logistic regression model. Since a model prediciting the outcomes correctly half the time is the dashed line in the middle, my model did perform better and have stronger predictive power. However, since a very strong ROC curve would have higher y axis values, the results from this ROC curve about my predicitve model are mixed.
+
+# Conclusion and Next Steps:
+
+Overall, I would argue that my predicitve model is appropriate for predicting feedback type of 1 but not for prediciting feedbck type -1 since my model correctly predicted the feedback type 1 95.86% of the time but only 14.54% of the time for the feedback type -1 values. From part 1, we saw that Lederberg clearly had the highest average success rate, with Hench coming in second, Forssmann coming in third, and Cori coming in last. However, we learned that the average number of neurons used is not necessarily indiciative of performance of the mice, as Forssmann had the highest average number. The results on average number of brain areas used is more mixed, as Lederberg did have the second highest number of brain areas used. I think that this may indicate that there are basic differences between the mice in ability to have a higher success rate or not since these factors did not have a clear relationship with performance of the mice. I think that some mice may also be able to learn better or worse than others since the changes in success rates as the different mice partook in more trials and more sessions differed. In terms of my model, I believe that the type of contrast level helped its predicitive power as these different scenarios set the mice up to be more or less successful right from the start. I also think that my variable mouse impacted the predicitive capability as this allowed my model to give different results based on which mouse was partaking in the trial.
+
+
+For next steps, I would definetly want to use the Support Vector Machine (SVM) method, which I was trying to attempting to apply to the testing data but could not get to work. I would try SVM with kernel = radial, kernel = polynomial, and kernel = linear to see the different performances and predicitive power and compare them. I would also try and include time as variable in my model. For example, I would try and learn if the mice had lower success rates per trial as the trials continued, since I would assume that they would get tired by the maybe the 300th trial in a session. I would also include more type of contrast values instead of just 0,1, and 2, since some of the contrast combinations are a lot easier to be successful in than other. For example, one screen's contrast level being 1 while the other is 0 is easier to be successful in than if one screen is 0.25 while the other is 0.5. I would also attempt the other data integration form of clustering to see whether my predicitve performance improved.
+
+
+
+# Acknowledgements/links I used:
+
+I adapted code from the Professor's Consulting sessions.
+I got help from TA's in office hours and adapted code from discussions as well.
+I used ChatGPT as a resource but always wrote my own code.
+
+# https://stackoverflow.com/questions/3402371/combine-two-data-frames-by-rows-rbind-when-they-have-different-sets-of-columns
+# https://stackoverflow.com/questions/32712301/create-empty-data-frame-with-column-names-by-assigning-a-string-vector
+## graphs:
+# https://stackoverflow.com/questions/10438752/adding-x-and-y-axis-labels-in-ggplot2
+# https://statisticsglobe.com/set-color-group-ggplot2-plot-r
+# https://stackoverflow.com/questions/60337707/how-to-plot-different-groups-with-different-colors-using-plot-function-in-r
+# https://stackoverflow.com/questions/63003022/change-scale-on-x-axis-in-ggplot-in-r
+# https://www.tutorialspoint.com/how-to-add-a-column-in-an-r-data-frame-with-consecutive-numbers
+# https://www.r-bloggers.com/2022/06/create-new-variables-from-existing-variables-in-r/
+## creating summary table in part 1:
+# https://www.guru99.com/r-aggregate-function.html
+# https://www.marsja.se/r-add-column-to-dataframe-based-on-other-columns-conditions-dplyr/
+# https://stackoverflow.com/questions/22104774/how-to-initialize-a-vector-with-fixed-length-in-r
+# https://r4ds.had.co.nz/vectors.html#:~:text=Atomic%20vectors%2C%20of%20which%20there,character%2C%20complex%2C%20and%20raw.
+# https://www.projectpro.io/recipes/plot-auc-roc-curve-r
+# https://stackoverflow.com/questions/65366230/looping-over-a-column-and-replacing-values-if-condition-is-met-in-r
+# https://stackoverflow.com/questions/31261946/multiple-if-statements-in-r
+# https://sparkbyexamples.com/r-programming/add-column-to-dataframe-in-r/#:~:text=To%20add%20a%20new%20column%20in%20R%2C%20use%20cbin(),after%20adding%20a%20new%20column.
+#https://www.machinelearningplus.com/machine-learning/logistic-regression-tutorial-examples-r/
+# https://cran.r-project.org/doc/manuals/R-lang.pdf
+# http://www.sthda.com/english/articles/36-classification-methods-essentials/151-logistic-regression-essentials-in-r/
+# http://rstudio-pubs-static.s3.amazonaws.com/74431_8cbd662559f6451f9cd411545f28107f.html
+# https://stackoverflow.com/questions/59107717/how-do-i-load-an-rds-file-into-r
+# https://yihui.org/en/2018/09/code-appendix/
+
+# Appendix:
+
+```{r ref.label=knitr::all_labels(), echo = T, eval = F}
+```
+
+
